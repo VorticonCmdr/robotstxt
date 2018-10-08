@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <title>robots.txt emulator cache</title>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link href="css/bootstrap.min.css" rel="stylesheet" />
+    <script src="js/jquery.min.js"></script>
+    <script src="js/mustache.min.js"></script>
+    <script src="js/robots.js"></script>
+  </head>
+  <body>
+    <script id="cachedTemplate" type="x-tmpl-mustache">
+      <option value="{{ key }}">{{ key }}</option>
+    </script>
+
+    <div class="container">
+      <div class="row">
+        <select id="cached" class="form-control">
+          <option>select robots.txt</option>
+        </select>
+        <textarea id="robotstxt" class="form-control" rows="15"></textarea>
+        <button id="update" type="button" class="btn btn-primary btn-lg btn-block">update</button>
+        <button id="clear" type="button" class="btn btn-danger btn-lg btn-block">clear selected</button>
+        <button id="clearAll" type="button" class="btn btn-danger btn-lg btn-block">clear all</button>
+      </div>
+    </div>
+
+  </body>
+</html>
