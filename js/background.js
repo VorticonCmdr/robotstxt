@@ -145,6 +145,10 @@ function Robots(opts) {
   }
   this.robotsCache = {};
 
+  this.setUserAgent = function (agent) {
+    this.opts.userAgent = agent.toLowerCase();
+  };
+
   this.getRecordsForAgent = function (key) {
     var domainBots = this.robotsCache[key] || {};
     var ourBotInBots = this.opts.userAgent in domainBots;
@@ -176,9 +180,6 @@ function Robots(opts) {
     return this.opts.allowOnNeutral;
   };
 }
-Robots.prototype.setUserAgent = function setUserAgent(agent) {
-  this.opts.userAgent = agent.toLowerCase();
-};
 Robots.prototype.setAllowOnNeutral = function setAllowOnNeutral(allow) {
   this.opts.allowOnNeutral = allow;
 };
@@ -402,11 +403,11 @@ chrome.runtime.onMessage.addListener(function(msg) {
       chrome.webRequest.onBeforeRequest.removeListener(robotfilter);
     }
   }
-  if (msg.type == 'userAgent') {
+  if (msg.state && (msg.type == 'userAgent')) {
     if (rob) {
-      rob.setUserAgent(msg.userAgent);
-      DFLT_OPTS.userAgent = msg.userAgent;
-    } 
+      rob.setUserAgent(msg.state);
+    }
+    DFLT_OPTS.userAgent = msg.state;
   }
 });
 
