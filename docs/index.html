@@ -161,20 +161,6 @@
       color: var(--muted);
       font-weight: 500;
     }
-    /* placeholder when no screenshot yet */
-    .screenshot-placeholder {
-      width: 100%;
-      aspect-ratio: 16/9;
-      background: var(--code-bg);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--border);
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-    }
-
     /* ── features ── */
     .features {
       padding: 80px 32px;
@@ -355,21 +341,24 @@
     <h2>Screenshots</h2>
     <div class="screenshot-grid">
       <div class="screenshot-card">
-        <!-- replace src with your actual screenshot file -->
-        <div class="screenshot-placeholder">screenshot coming soon</div>
+        <img src="screenshots/popup.png" alt="Popup — toggle blocking, open live log or cache editor" loading="lazy" />
         <div class="caption">Popup — toggle blocking, open live log or cache editor</div>
       </div>
       <div class="screenshot-card">
-        <div class="screenshot-placeholder">screenshot coming soon</div>
+        <img src="screenshots/logger.png" alt="Live log — blocked requests in real time with line-level links" loading="lazy" />
         <div class="caption">Live log — blocked requests in real time with line-level links</div>
       </div>
       <div class="screenshot-card">
-        <div class="screenshot-placeholder">screenshot coming soon</div>
+        <img src="screenshots/robots.png" alt="robots.txt cache editor — annotated, inline-editable, with URL tester" loading="lazy" />
         <div class="caption">robots.txt cache editor — annotated, inline-editable, with URL tester</div>
       </div>
       <div class="screenshot-card">
-        <div class="screenshot-placeholder">screenshot coming soon</div>
+        <img src="screenshots/overlay.png" alt="Race condition banner — reload prompt when blocking was missed" loading="lazy" />
         <div class="caption">Race condition banner — reload prompt when blocking was missed</div>
+      </div>
+      <div class="screenshot-card">
+        <img src="screenshots/options.png" alt="Options — select user-agent, clear cache" loading="lazy" />
+        <div class="caption">Options — select user-agent, clear cache</div>
       </div>
     </div>
   </section>
