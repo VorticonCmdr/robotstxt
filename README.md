@@ -1,291 +1,294 @@
 # robots.txt emulator
 
-Eine Chrome-Extension (Manifest V3), die `robots.txt`-Regeln für den normalen Browser-Traffic durchsetzt. Ruft beim Besuch einer Domain deren `robots.txt` ab und blockiert alle Anfragen, die die dortigen Regeln verbieten — genau so, wie ein Crawler es täte.
+A Chrome extension (Manifest V3) that enforces `robots.txt` rules for normal browser traffic. On first visit to any domain it fetches that domain's `robots.txt`, then blocks every request the rules disallow — exactly as a crawler would.
 
 ---
 
-## Inhaltsverzeichnis
+## Table of contents
 
 1. [Motivation](#motivation)
-2. [Funktionen](#funktionen)
-3. [Architektur](#architektur)
-   - [Warum zwei Mechanismen?](#warum-zwei-mechanismen)
-   - [Blockieren via declarativeNetRequest](#blockieren-via-declarativenetrequest)
-   - [Protokollieren via webRequest](#protokollieren-via-webrequest)
-   - [Der Service Worker](#der-service-worker)
-   - [Datenspeicherung](#datenspeicherung)
-4. [Dateiübersicht](#dateiübersicht)
-5. [Entwicklung und Build](#entwicklung-und-build)
-6. [Extension laden](#extension-laden)
-7. [Nutzung](#nutzung)
+2. [Features](#features)
+3. [Architecture](#architecture)
+   - [Why two mechanisms?](#why-two-mechanisms)
+   - [Blocking via declarativeNetRequest](#blocking-via-declarativenetrequest)
+   - [Logging via webRequest](#logging-via-webrequest)
+   - [The service worker](#the-service-worker)
+   - [Storage](#storage)
+4. [File map](#file-map)
+5. [Development and build](#development-and-build)
+6. [Loading the extension](#loading-the-extension)
+7. [Usage](#usage)
    - [Popup](#popup)
-   - [Live-Protokoll](#live-protokoll)
-   - [robots.txt-Cache](#robotstxt-cache)
-   - [Optionen](#optionen)
-8. [Bekannte Einschränkungen](#bekannte-einschränkungen)
+   - [Live log](#live-log)
+   - [robots.txt cache](#robotstxt-cache)
+   - [Options](#options)
+8. [Known limitations](#known-limitations)
 
 ---
 
 ## Motivation
 
-`robots.txt` ist eine Konvention für Web-Crawler: Betreiber einer Website erklären darin, welche Pfade automatisierte Programme nicht aufrufen sollen. Browser halten sich nicht daran — sie sind keine Crawler. Diese Extension schließt diese Lücke: Sie liest `robots.txt` wie ein Crawler und blockiert im Browser exakt die Pfade, die dort als `Disallow` markiert sind.
+`robots.txt` is a convention for web crawlers: site operators declare which paths automated programs should not access. Browsers don't obey it — they are not crawlers. This extension closes that gap: it reads `robots.txt` like a crawler and blocks exactly the paths marked `Disallow`.
 
-Nützlich z. B. wenn man:
-- das eigene `robots.txt` testen möchte, bevor ein Crawler es auswertet,
-- nachvollziehen möchte, welche Teile einer Seite für Bots gesperrt sind,
-- den eigenen Browser absichtlich wie einen bestimmten Bot (z. B. Googlebot) verhalten lassen will.
-
----
-
-## Funktionen
-
-- **Automatisches Abrufen** der `robots.txt` beim ersten Besuch jeder Domain. Das Ergebnis wird 24 Stunden im Cache gehalten (bis zu 500 KB pro Datei).
-- **Echtes Blockieren** über Chrome DNR-Regeln (`declarativeNetRequest`): gesperrte URLs werden vom Browser abgebrochen, bevor die Anfrage das Netz erreicht.
-- **Wählbarer User-Agent**: Standardmäßig wird die `*`-Gruppe ausgewertet; in den Optionen kann auf `Googlebot` (oder einen anderen bekannten Agenten) umgestellt werden.
-- **Live-Protokoll**: Zeigt in Echtzeit, welche URLs geblockt wurden — mit Tab-Filter, Spalten für Methode, Typ, Reason und Referrer sowie klickbarer Verlinkung zur genauen `robots.txt`-Zeile.
-- **robots.txt-Cache-Editor**: Zeigt die gespeicherten `robots.txt`-Texte aller besuchten Domains mit annotierter, direkt editierbarer Ansicht, Tab-Filter, Suchfeld und URL-Tester.
-- **Blocking-Checkbox**: Das Blockieren lässt sich im Popup per Checkbox deaktivieren; alle DNR-Regeln werden entfernt und beim erneuten Aktivieren sofort wiederhergestellt.
-- **Persistenz über Browser-Neustarts**: Regeln bleiben als Chrome-DNR-Dynamic-Rules erhalten; ein Neustart des Service Workers löscht keine Daten.
+Useful when you want to:
+- test your own `robots.txt` before a crawler evaluates it,
+- understand which parts of a site are off-limits to bots,
+- deliberately make your browser behave like a specific bot (e.g. Googlebot).
 
 ---
 
-## Architektur
+## Features
 
-### Warum zwei Mechanismen?
-
-Manifest V3 hat das blockierende `webRequest` (`["blocking"]`) entfernt. Blockieren geschieht nur noch über deklarative Regeln (`declarativeNetRequest`, kurz DNR). Diese Regeln werden *im Voraus* installiert und arbeiten ohne JavaScript. Das hat Konsequenzen:
-
-| Aspekt | Manifest V2 (alt) | Manifest V3 (jetzt) |
-|--------|-------------------|---------------------|
-| Blockieren | `webRequest` mit `["blocking"]` — pro Request, in JS | `declarativeNetRequest` — deklarative Regeln, vor dem Request |
-| Entscheidung | Einzelner Aufruf von `canVisit(url)` im Hintergrund | Regeln werden vorab pro Domain installiert |
-| Logger | Direkt im blockierenden Listener | Separater non-blocking `webRequest`-Observer |
-| Hintergrund | Persistente Hintergrundseite | Ephemerer Service Worker |
-
-Die Extension nutzt deshalb **zwei Kanäle gleichzeitig**:
-
-```
-Navigation → robots.txt abrufen → DNR-Regeln installieren → Chrome blockiert Requests
-                                                              ↓
-                         non-blocking webRequest-Observer → Logger (Live-Protokoll)
-```
-
-### Blockieren via declarativeNetRequest
-
-`src/dnr.js` übersetzt `robots.txt`-Pfade in DNR-Regeln:
-
-- Jeder `Disallow:`-Pfad wird zu einer `block`-Regel.
-- Jeder `Allow:`-Pfad wird zu einer `allow`-Regel.
-- Statt `regexFilter` (RE2) wird `urlFilter` verwendet — Chrome limitiert dynamische Regex-Regeln auf 1 000; `urlFilter` hat kein solches Zusatzlimit. Das `urlFilter`-Format (`|` = Linanker links/rechts, `*` = Wildcard) bildet alle benötigten robots.txt-Muster exakt ab.
-- Die **Priorität** einer Regel ergibt sich aus `1 + Musterlänge`: längere (spezifischere) Muster gewinnen. Bei Gleichstand bevorzugt DNR automatisch `allow` über `block` — das spiegelt die robots.txt-Konvention (Allow schlägt Disallow bei gleicher Spezifität) exakt wider.
-- DNR-Regeln werden pro Domain dynamisch installiert (`chrome.declarativeNetRequest.updateDynamicRules`) und überleben den SW-Neustart.
-- Das Limit für dynamische Regeln liegt bei 30 000; die Extension hält sich unter 28 000 und verdrängt bei Bedarf die ältesten Domains (LRU-Eviction).
-
-### Protokollieren via webRequest
-
-`src/background.js` registriert einen **non-blocking** `webRequest.onBeforeRequest`-Listener. Dieser:
-
-1. Lädt den gecachten `robots.txt`-Text für die betreffende Domain.
-2. Ruft `RobotsMatcher.oneAgentAllowedByRobots(text, agent, url)` aus der Bibliothek [`google-robotstxt-parser`](https://www.npmjs.com/package/google-robotstxt-parser) auf — das ist die maßgebliche Entscheidung (Googles C++-Parser, nach JS portiert).
-3. Wenn die URL geblockt sein sollte, ermittelt `findMatchingLine()` (aus `src/extract.js`) die genaue Zeilennummer der auslösenden `Disallow`-Regel und sendet eine `logline`-Nachricht mit allen Details (URL, Methode, Ressourcentyp, Reason, Zeilennummer, Referrer) an das Live-Protokoll.
-
-Dieser Listener kann keine Requests abbrechen (kein `["blocking"]`). Das tatsächliche Blockieren macht ausschließlich DNR. Der Observer dient nur der Protokollierung und dem Lazy-Fetch noch unbekannter Domains.
-
-Die Entscheidung fällt damit **zweimal**: DNR (approximativ, deklarativ) und Matcher (ground truth, für den Logger). Kleine Abweichungen zwischen beiden sind ein dokumentierter Kompromiss.
-
-### Der Service Worker
-
-`src/background.js` ist der Service Worker. Er:
-
-- Registriert **alle Listener synchron beim Start** (top-level), damit sie nach jedem SW-Aufwachen sofort aktiv sind.
-- Hält ein kleines In-Memory-Shadow für `enabled` und `preferredAgent`, das beim Aufwachen aus `chrome.storage.local` geladen wird (`settingsReady`-Promise).
-- **Besitzt alle DNR-Mutationen**: Seiten (Popup, Cache-Editor, Optionen) senden Intent-Nachrichten; der SW führt Storage-Schreiboperationen und DNR-Regelaktualisierungen atomar durch.
-- Dedupliziert parallele Fetches derselben Domain mit einem `inFlight`-Set.
-
-**HTTP-Status → robots.txt-Text** (Semantik aus MV2 beibehalten):
-
-| HTTP-Status | Ergebnis |
-|-------------|----------|
-| `200` | Inhalt (auf 500 000 Bytes / 500 KB begrenzt) |
-| `5xx` / Timeout | `Disallow: /` (alles blockiert) |
-| `204`, `4xx`, Netzwerkfehler | `Allow: /` (alles erlaubt) |
-
-### Datenspeicherung
-
-Alle Daten liegen in `chrome.storage.local`:
-
-| Schlüssel | Inhalt |
-|-----------|--------|
-| `r:<protocol://host>` | `{ text, status, timestamp, ruleIds: number[] }` — ein Eintrag pro Domain |
-| `state` | `true` / `false` — Extension aktiv oder nicht |
-| `preferredRecordGroup` | Gewählter User-Agent, z. B. `*` oder `Googlebot` |
-| `nextRuleId` | Monoton steigender Zähler für DNR-Regel-IDs |
-| `loggerFocusTab` | Zuletzt aktiver Tab-ID aus dem Popup (für Logger-Synchronisation) |
-
-Das Präfix `r:` trennt Domain-Einträge von den Settings-Schlüsseln.
+- **Automatic fetching** of `robots.txt` on first visit to any domain. Results are cached for 24 hours (up to 500 KB per file).
+- **Real blocking** via Chrome DNR rules (`declarativeNetRequest`): disallowed URLs are cancelled by the browser before the request reaches the network.
+- **Selectable user-agent**: defaults to the `*` group; can be switched to `Googlebot` or any custom agent string in the options.
+- **Live log**: shows blocked requests in real time — with tab filter, columns for method, type, reason, and referrer, and a clickable link to the exact `robots.txt` line that triggered the block.
+- **robots.txt cache editor**: displays and edits the cached `robots.txt` of every visited domain, with an annotated inline-editable view, tab filter, search field, and URL tester.
+- **Blocking checkbox**: blocking can be toggled off in the popup; all DNR rules are removed and instantly reinstalled when re-enabled.
+- **Race condition detection**: when a URL should have been blocked but wasn't because `robots.txt` wasn't cached yet, the extension retroactively detects this, logs it as `robots-race`, changes the extension icon, and shows a reload banner on the affected tab.
+- **Persistence across browser restarts**: DNR rules survive service worker restarts — no data is lost on wake.
 
 ---
 
-## Dateiübersicht
+## Architecture
+
+### Why two mechanisms?
+
+Manifest V3 removed blocking `webRequest` (`["blocking"]`). Blocking now requires declarative rules (`declarativeNetRequest`, DNR for short), installed *in advance* and evaluated without JavaScript. This has consequences:
+
+| Aspect | Manifest V2 (old) | Manifest V3 (now) |
+|--------|-------------------|-------------------|
+| Blocking | `webRequest` with `["blocking"]` — per request, in JS | `declarativeNetRequest` — declarative rules, before the request |
+| Decision | Single `canVisit(url)` call in the background | Rules installed per domain ahead of requests |
+| Logger | Directly in the blocking listener | Separate non-blocking `webRequest` observer |
+| Background | Persistent background page | Ephemeral service worker |
+
+The extension therefore uses **two channels in parallel**:
 
 ```
-manifest.json          Manifest V3 (Build-Einstiegspunkt für CRXJS)
-vite.config.js         Vite + CRXJS-Plugin-Konfiguration
-package.json           npm-Abhängigkeiten und Build-Skripte
+Navigation → fetch robots.txt → install DNR rules → Chrome blocks requests
+                                                     ↓
+                     non-blocking webRequest observer → logger (live log)
+```
+
+### Blocking via declarativeNetRequest
+
+`src/dnr.js` translates `robots.txt` paths into DNR rules:
+
+- Each `Disallow:` path becomes a `block` rule.
+- Each `Allow:` path becomes an `allow` rule.
+- `urlFilter` is used instead of `regexFilter` (RE2) — Chrome caps dynamic regex rules at 1,000; `urlFilter` has no such sub-limit. The `urlFilter` format (`|` = left/right anchor, `*` = wildcard) covers all required robots.txt patterns exactly.
+- **Priority** is `1 + pattern length`: longer (more specific) patterns win. At equal priority DNR already favours `allow` over `block`, which mirrors the robots.txt convention (Allow beats Disallow at equal specificity).
+- Rules are installed per domain via `chrome.declarativeNetRequest.updateDynamicRules` and survive service worker restarts.
+- The dynamic rule cap is 30,000; the extension stays under 28,000 and evicts the least-recently-used domains when necessary.
+
+### Logging via webRequest
+
+`src/background.js` registers a **non-blocking** `webRequest.onBeforeRequest` listener that:
+
+1. Loads the cached `robots.txt` text for the domain.
+2. Calls `RobotsMatcher.oneAgentAllowedByRobots(text, agent, url)` from the [`google-robotstxt-parser`](https://www.npmjs.com/package/google-robotstxt-parser) library — the authoritative decision (Google's C++ parser, ported to JS).
+3. If the URL should be blocked, `findMatchingLine()` (from `src/extract.js`) determines the exact line number of the triggering `Disallow` rule and sends a `logline` message with all details (URL, method, resource type, reason, line number, referrer) to the live log.
+
+This listener cannot cancel requests (no `["blocking"]`). Actual blocking is done exclusively by DNR. The observer is used only for logging and lazy-fetching unseen domains.
+
+The decision is therefore made **twice**: DNR (approximate, declarative) and the matcher (ground truth, for the logger). Minor divergences are a documented trade-off.
+
+### The service worker
+
+`src/background.js` is the service worker. It:
+
+- Registers **all listeners synchronously at startup** (top-level) so they are active immediately after every SW wake.
+- Keeps a small in-memory shadow of `enabled` and `preferredAgent`, reloaded from `chrome.storage.local` on wake via the `settingsReady` promise.
+- **Owns all DNR mutations**: pages (popup, cache editor, options) send intent messages; the SW performs storage writes and DNR rule updates atomically.
+- Deduplicates concurrent fetches for the same domain using a `fetchPromises` map so all concurrent callers share the same promise and are notified when the fetch completes.
+
+**HTTP status → robots.txt text** (semantics preserved from MV2):
+
+| HTTP status | Result |
+|-------------|--------|
+| `200` | Body (capped at 500,000 bytes / 500 KB) |
+| `5xx` / timeout | `Disallow: /` (block everything) |
+| `204`, `4xx`, network error | `Allow: /` (allow everything) |
+
+### Storage
+
+All data lives in `chrome.storage.local`:
+
+| Key | Contents |
+|-----|----------|
+| `r:<protocol://host>` | `{ text, status, timestamp, ruleIds: number[] }` — one entry per domain |
+| `state` | `true` / `false` — extension active or not |
+| `preferredRecordGroup` | Selected user-agent, e.g. `*` or `googlebot` |
+| `nextRuleId` | Monotonically increasing counter for DNR rule IDs |
+| `loggerFocusTab` | Last active tab ID from the popup (for logger tab sync) |
+
+The `r:` prefix separates domain entries from settings keys.
+
+---
+
+## File map
+
+```
+manifest.json          Manifest V3 (CRXJS build entry point)
+vite.config.js         Vite + CRXJS plugin configuration
+package.json           npm dependencies and build scripts
 
 src/
-  background.js        Service Worker: Fetch, Navigation→Regeln, Observer→Logger, Messages
-  dnr.js               robots.txt-Pfade → DNR-Regeln (urlFilter); Installieren/Evict/Löschen
-  extract.js           Allow/Disallow-Pfade + findMatchingLine() aus robots.txt extrahieren
-  cache.js             chrome.storage.local-Helfer + DNR-Regel-ID-Vergabe
-  popup.js             Aktions-Popup: Blocking-Checkbox, Navigation zu anderen Seiten
-  logger.js            Live-Blockierungsprotokoll (logger.html)
-  robots.js            Cache-Ansicht/-Editor (robots.html)
-  options.js           User-Agent-Auswahl + Cache leeren (options.html)
+  background.js        Service worker: fetch, navigation→rules, observer→logger, messages
+  dnr.js               robots.txt paths → DNR rules (urlFilter); install / evict / clear
+  extract.js           Allow/Disallow paths + findMatchingLine() from robots.txt
+  cache.js             chrome.storage.local helpers + DNR rule ID allocation
+  popup.js             Action popup: blocking checkbox, navigation to other pages
+  logger.js            Live block log (logger.html)
+  robots.js            Cache viewer / editor (robots.html)
+  options.js           User-agent selection + cache clear (options.html)
 
-popup.html             Popup (in manifest.json referenziert)
-options.html           Optionsseite (in manifest.json referenziert)
-logger.html            Live-Protokoll (zur Laufzeit geöffnet)
-robots.html            Cache-Editor (zur Laufzeit geöffnet)
+popup.html             Popup (referenced from manifest.json)
+options.html           Options page (referenced from manifest.json)
+logger.html            Live log (opened at runtime)
+robots.html            Cache editor (opened at runtime)
 
-icons/                 PNG-Icons in verschiedenen Größen
-dist/                  Build-Ausgabe (wird als Extension geladen)
+icons/                 PNG icons in various sizes
+dist/                  Build output (load this as the unpacked extension)
 ```
 
 ---
 
-## Entwicklung und Build
+## Development and build
 
-**Voraussetzungen:** Node.js ≥ 18, npm
+**Prerequisites:** Node.js ≥ 18, npm
 
 ```bash
-# Abhängigkeiten installieren
+# Install dependencies
 npm install
 
-# Produktions-Build (dist/ wird erstellt/aktualisiert)
+# Production build (creates / updates dist/)
 npm run build
 
-# Entwicklungs-Server mit HMR (Hot Module Replacement)
+# Development server with HMR (Hot Module Replacement)
 npm run dev
 ```
 
-Der Build nutzt [Vite](https://vite.dev) mit dem [@crxjs/vite-plugin](https://crxjs.dev/vite-plugin). Das Plugin liest `manifest.json` als Build-Einstiegspunkt und bündelt den Service Worker sowie alle HTML-Seiten inklusive ihrer npm-Imports automatisch.
+The build uses [Vite](https://vite.dev) with the [@crxjs/vite-plugin](https://crxjs.dev/vite-plugin). The plugin reads `manifest.json` as the build entry point and bundles the service worker and all HTML pages including their npm imports automatically.
 
-`logger.html` und `robots.html` sind nicht im Manifest referenziert (sie werden zur Laufzeit per `chrome.tabs.create` geöffnet) und werden deshalb explizit als `rollupOptions.input` in `vite.config.js` deklariert.
-
----
-
-## Extension laden
-
-1. `npm run build` ausführen (einmalig oder nach Änderungen).
-2. In Chrome `chrome://extensions` öffnen.
-3. **Entwicklermodus** oben rechts aktivieren.
-4. **„Entpackte Extension laden"** klicken und das Verzeichnis **`dist/`** auswählen.
-5. Die Extension erscheint mit dem Roboter-Icon in der Toolbar.
-
-Nach Codeänderungen genügt es, `npm run build` erneut auszuführen und auf der Extensions-Seite die Schaltfläche **„Neu laden"** (↺) zu klicken.
+`logger.html` and `robots.html` are not referenced from the manifest (they are opened at runtime via `chrome.tabs.create`) and are therefore declared explicitly as `rollupOptions.input` in `vite.config.js`.
 
 ---
 
-## Nutzung
+## Loading the extension
+
+1. Run `npm run build` (once, or after any code change).
+2. Open `chrome://extensions` in Chrome.
+3. Enable **Developer mode** (top right).
+4. Click **"Load unpacked"** and select the **`dist/`** directory.
+5. The extension appears with its robot icon in the toolbar.
+
+After code changes, re-run `npm run build` and click the **reload** button (↺) on the extensions page.
+
+---
+
+## Usage
 
 ### Popup
 
-Ein Klick auf das Extension-Icon in der Toolbar öffnet das Popup. Es enthält:
+Click the extension icon in the toolbar to open the popup.
 
-| Element | Funktion |
-|---|---|
-| **Blocking** (Checkbox) | Blockierung ein-/ausschalten. Im deaktivierten Zustand werden alle DNR-Regeln entfernt; beim erneuten Aktivieren werden sie sofort neu installiert. Das Icon wechselt zwischen farbig (aktiv) und grau (inaktiv). |
-| **live protocol** | Öffnet das Live-Protokoll in einem neuen Tab. Der aktuelle Tab wird automatisch im Protokoll vorausgewählt. |
-| **robots.txt cache** | Öffnet den Cache-Editor in einem neuen Tab. |
-| **options** | Öffnet die Optionsseite in einem neuen Tab. |
+| Element | Function |
+|---------|----------|
+| **Blocking** (checkbox) | Toggle blocking on/off. When disabled all DNR rules are removed; re-enabling reinstalls them immediately. The icon switches between colour (active) and grey (inactive). |
+| **live protocol** | Opens the live log in a new tab. The current tab is automatically pre-selected in the log. |
+| **robots.txt cache** | Opens the cache editor in a new tab. |
+| **options** | Opens the options page in a new tab. |
 
-### Live-Protokoll
+### Live log
 
-`logger.html` — zeigt in Echtzeit alle Requests, die als geblockt erkannt wurden. Dark-Theme, nutzt die volle Fensterbreite.
+`logger.html` — shows all requests identified as blocked in real time. Dark theme, full window width.
 
-**Tabellenspalten:**
+**Table columns:**
 
-| Spalte | Inhalt |
-|--------|--------|
-| Time | Uhrzeit des Requests (HH:MM:SS) |
-| Method | HTTP-Methode (GET, POST, …) |
-| URL | Vollständige geblockte URL |
-| Type | Ressourcentyp als farbiges Badge (document, script, xhr, image, …) |
-| Reason | `robots-disallow` (Disallow-Regel gefunden) oder `robots-unavailable` (robots.txt nicht erreichbar → alles gesperrt) |
-| Line | Zeilennummer der auslösenden Disallow-Regel in der `robots.txt` — klickbar, öffnet direkt den Cache-Editor an der richtigen Zeile |
-| Referrer | Initiator des Requests (aufrufende Seite) |
+| Column | Contents |
+|--------|----------|
+| Time | Request time (HH:MM:SS) |
+| Method | HTTP method (GET, POST, …) |
+| URL | Full blocked URL |
+| Type | Resource type as a colour-coded badge (document, script, xhr, image, …) |
+| Reason | `robots-disallow` (Disallow rule matched), `robots-unavailable` (robots.txt unreachable → everything blocked), or `robots-race` (URL should have been blocked but bypassed due to missing cache — shown in orange) |
+| Line | Line number of the triggering Disallow rule in `robots.txt` — clickable, opens the cache editor at that exact line |
+| Referrer | Origin of the initiating request |
 
-**Bedienung:**
-- **Clear display**: Leert die angezeigte Tabelle (in-memory-Einträge werden ebenfalls gelöscht).
-- **Download JSON**: Exportiert alle protokollierten Einträge als JSON-Datei.
-- **Tab-Selektor** (oben rechts): Filtert die Ansicht auf einen bestimmten Tab. Wird automatisch auf den aktuell aktiven Tab gesetzt, wenn das Popup geöffnet wird.
+**Controls:**
+- **Clear display**: empties the displayed table (in-memory entries are also cleared).
+- **Download JSON**: exports all logged entries as a JSON file.
+- **Tab selector** (top right): filters the view to a specific tab. Automatically set to the active tab when the popup is opened.
 
-Die neuesten Einträge erscheinen oben. Ein Neuladen der Seite leert die Tabelle.
+Newest entries appear at the top. Reloading the page clears the table.
 
-### robots.txt-Cache
+### robots.txt cache
 
-`robots.html` — verwaltet den lokalen `robots.txt`-Cache mit einer annotierten, editierbaren Ansicht. Helles Design.
+`robots.html` — manages the local `robots.txt` cache with an annotated, directly editable view. Light theme.
 
-**Bedienung:**
+**Controls:**
 
-- **Tab-Selektor**: Filtert die Host-Liste auf Domains, die auf dem gewählten Tab sichtbar sind. „all tabs" zeigt alle gecachten Domains.
-- **Suchfeld** (mit Datalist-Autovervollständigung): Wählt den gewünschten Host aus. Beim Tab-Filter wird bei einem eindeutigen Treffer automatisch geladen.
-- **Update**: Speichert den bearbeiteten Text und installiert sofort neue DNR-Regeln für diese Domain.
-- **Clear selected**: Löscht den Eintrag und alle zugehörigen Blockierungsregeln. Beim nächsten Besuch wird `robots.txt` neu abgerufen.
-- **Clear all**: Löscht sämtliche gecachten Einträge und alle DNR-Regeln.
+- **Tab selector**: filters the host list to domains visible on the selected tab. "all tabs" shows every cached domain.
+- **Search field** (with datalist autocomplete): selects the desired host. With a tab filter, a unique match is loaded automatically.
+- **(Re)fetch**: forces a fresh network fetch for the current host; rules are reinstalled when the response arrives. The view updates automatically.
+- **Clear selected**: deletes the entry and all its blocking rules. The next visit re-fetches `robots.txt`.
+- **Clear all**: deletes all cached entries and all DNR rules.
 
-**Annotierte Ansicht:**
+**Annotated view:**
 
-- Jede Zeile zeigt Zeilennummer, ein farbiges Indikator-Icon und den Zeilentext.
-- `Allow`-Regeln sind grün markiert, `Disallow`-Regeln rot, Fehler werden mit einem Badge ausgewiesen.
-- Die Zeilen sind **direkt editierbar** (kein separater Texteditor nötig): in jede Zeile klicken und tippen. Enter fügt eine neue Zeile ein, Backspace am Zeilenanfang fügt die Zeile mit der vorherigen zusammen. Mehrzeiliges Einfügen (Paste) wird korrekt verarbeitet.
-- Beim Tippen werden Indikatoren und Badges live aktualisiert.
+- Each line shows a line number, a colour-coded indicator, and the line text.
+- `Allow` rules are highlighted green, `Disallow` rules red; typos and unrecognised directives get warning badges.
+- Lines are **directly editable** (no separate text editor): click any line and type. Enter inserts a new line, Backspace at the start of a line merges it with the previous one. Multi-line paste is handled correctly.
+- Indicators and badges update live as you type.
+- Every edit is auto-saved 300 ms after the last keystroke.
 
-**URL-Tester** (untere Leiste):
+**URL tester** (bottom bar):
 
-- URL eingeben (z. B. `https://example.com/admin/`) → sofortiges Ergebnis: **ALLOWED** oder **BLOCKED**.
-- Optionales Agent-Feld: testet mit einem anderen User-Agent als dem in den Optionen gewählten.
-- Die auslösende Zeile wird in der annotierten Ansicht grün hervorgehoben.
+- Enter a URL (e.g. `https://example.com/admin/`) for an instant **ALLOWED** / **BLOCKED** result.
+- Optional agent field: test with a different user-agent than the one set in options.
+- The triggering line is highlighted green in the annotated view.
 
-**Deep-Links:**
+**Deep links:**
 
-Die Seite unterstützt direkte Verlinkung über URL-Parameter:
-- `robots.html?host=https://example.com` — lädt direkt den Eintrag für diesen Host.
-- `robots.html?host=https://example.com&line=42` — lädt den Eintrag und scrollt zu Zeile 42 (z. B. vom Live-Protokoll aus).
+The page supports direct linking via URL parameters:
+- `robots.html?host=https://example.com` — loads that host's entry directly.
+- `robots.html?host=https://example.com&line=42` — loads the entry and scrolls to line 42 (used by the live log).
 
-### Optionen
+### Options
 
-`options.html` — zwei Einstellungen:
+`options.html` — two settings:
 
-**Preferred record group (User-Agent)**
+**Preferred user-agent**
 
-Legt fest, welche User-Agent-Gruppe aus `robots.txt` ausgewertet wird:
+Determines which user-agent group from `robots.txt` is evaluated:
 
-- `*` (Standard): Die Catch-all-Gruppe gilt für alle nicht namentlich genannten Bots.
-- `Googlebot`: Die für Googlebot spezifischen Regeln werden angewendet. Hat eine `robots.txt` keinen Googlebot-Abschnitt, greift automatisch `*`.
+- `*` (default): the catch-all group, applies to all bots not named explicitly.
+- `googlebot` (preset): Googlebot-specific rules. If a `robots.txt` has no Googlebot section, the `*` group is used as fallback.
+- Any custom string can be typed in the field.
 
-Ein Wechsel des Agenten löst sofort eine Neuberechnung aller DNR-Regeln für alle gecachten Domains aus.
+Changing the agent immediately triggers a rule rebuild for all cached domains.
 
-**Empty stored robots.txt cache**
+**Clear all cached robots.txt**
 
-Löscht alle gecachten Einträge und DNR-Regeln — identisch mit „Clear all" im Cache-Editor.
+Deletes all cached entries and DNR rules — identical to "Clear all" in the cache editor.
 
 ---
 
-## Bekannte Einschränkungen
+## Known limitations
 
-**Erste-Anfrage-Lücke (First-Visit Race)**
-MV3 bietet keinen Mechanismus, einen Request zu pausieren, bis Regeln installiert sind. Beim allerersten Besuch einer Domain kann der `main_frame`-Request ankommen, bevor die DNR-Regeln installiert wurden. Alle nachfolgenden Besuche sind durch die persistierten Regeln abgedeckt.
+**First-visit race condition**
+MV3 provides no mechanism to pause a request until rules are installed. On the very first visit to a domain the `main_frame` request may arrive before the DNR rules are set up. The extension detects this retroactively: requests that should have been blocked are logged as `robots-race`, the extension icon changes, and a reload banner is shown on the affected tab. All subsequent visits are covered by persisted rules.
 
-**DNR-Approximation vs. Matcher-Wahrheit**
-Die DNR-Regeln sind eine best-effort-Übersetzung von `robots.txt`-Mustern in `urlFilter`-Ausdrücke. Die endgültige Entscheidung im Live-Protokoll trifft `RobotsMatcher.oneAgentAllowedByRobots()` — Googles offizielle Implementierung. In seltenen Fällen können DNR-Block und Matcher-Ergebnis leicht voneinander abweichen.
+**DNR approximation vs. matcher ground truth**
+DNR rules are a best-effort translation of `robots.txt` patterns into `urlFilter` expressions. The final decision in the live log is made by `RobotsMatcher.oneAgentAllowedByRobots()` — Google's official implementation. In rare edge cases the DNR block and the matcher result can diverge slightly.
 
-**Nur HTTP/HTTPS**
-`robots.txt` ist für Web-Traffic definiert. `chrome-extension://`-, `file://`- und andere Schemata werden ignoriert.
+**HTTP/HTTPS only**
+`robots.txt` is defined for web traffic. `chrome-extension://`, `file://`, and other schemes are ignored.
 
-**Cache-TTL 24 Stunden**
-`robots.txt`-Änderungen auf dem Server werden erst nach Ablauf von 24 Stunden oder manuellem Cache-Löschen wirksam.
+**Cache TTL: 24 hours**
+Changes to `robots.txt` on the server take effect only after 24 hours or a manual cache clear.
 
-**DNR-Limit**
-Chrome erlaubt maximal 30 000 dynamische Regeln insgesamt. Die Extension reserviert 2 000 als Puffer und verdrängt bei Bedarf die am längsten nicht besuchten Domains (LRU-Eviction). Bei sehr vielen besuchten Domains mit langen `robots.txt`-Dateien können ältere Einträge automatisch aus dem Blockierungsregelsatz entfernt werden (der Cache-Eintrag bleibt erhalten).
+**DNR rule cap**
+Chrome allows at most 30,000 dynamic rules in total. The extension reserves 2,000 as headroom and evicts the least-recently-used domains when approaching the cap. For users who visit very many domains with long `robots.txt` files, older entries may be automatically removed from the blocking rule set (the cache entry itself is retained).
