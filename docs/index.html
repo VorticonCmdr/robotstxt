@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>robots.txt emulator — Chrome Extension</title>
+  <meta name="description" content="A Chrome extension that enforces robots.txt rules for human browser traffic. See exactly what a crawler sees — blocked URLs, live log, annotated cache editor." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --accent: #4a9eff;
+      --accent2: #3ddc84;
+      --red: #ff5f57;
+      --text: #e8eaf0;
+      --muted: #8b8fa8;
+      --code-bg: #12141c;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(15, 17, 23, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+    .nav-brand {
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent2); }
+    nav a { font-size: 14px; color: var(--muted); }
+    nav a:hover { color: var(--text); text-decoration: none; }
+    .nav-spacer { flex: 1; }
+    .nav-gh {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 13px;
+      color: var(--text) !important;
+    }
+    .nav-gh:hover { background: var(--surface); text-decoration: none !important; }
+
+    /* ── hero ── */
+    .hero {
+      padding: 100px 32px 80px;
+      text-align: center;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(74, 158, 255, 0.12);
+      border: 1px solid rgba(74, 158, 255, 0.3);
+      color: var(--accent);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 24px;
+      letter-spacing: 0.04em;
+    }
+    h1 {
+      font-size: clamp(36px, 6vw, 58px);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      margin-bottom: 20px;
+    }
+    h1 code {
+      color: var(--accent);
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 0.9em;
+    }
+    .hero-sub {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 560px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; text-decoration: none; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+
+    /* ── screenshot carousel ── */
+    .screenshots {
+      padding: 64px 32px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .screenshots h2 { text-align: center; font-size: 28px; font-weight: 700; margin-bottom: 40px; }
+    .screenshot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .screenshot-card {
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .screenshot-card img {
+      width: 100%;
+      display: block;
+    }
+    .screenshot-card .caption {
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    /* placeholder when no screenshot yet */
+    .screenshot-placeholder {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: var(--code-bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--border);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+
+    /* ── features ── */
+    .features {
+      padding: 80px 32px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .features h2 { font-size: 28px; font-weight: 700; margin-bottom: 48px; text-align: center; }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+    }
+    .feature-icon {
+      font-size: 28px;
+      margin-bottom: 14px;
+      display: block;
+    }
+    .feature-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+    .feature-card p { font-size: 14px; color: var(--muted); line-height: 1.6; }
+
+    /* ── how it works ── */
+    .how {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 80px 32px;
+    }
+    .how-inner { max-width: 720px; margin: 0 auto; }
+    .how h2 { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
+    .how .sub { color: var(--muted); font-size: 15px; margin-bottom: 40px; }
+    .flow {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .flow-step {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+      padding: 20px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .flow-step:last-child { border-bottom: none; }
+    .step-num {
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(74, 158, 255, 0.12);
+      border: 1px solid rgba(74, 158, 255, 0.3);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .step-body h4 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    .step-body p { font-size: 14px; color: var(--muted); }
+    code {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.88em;
+    }
+
+    /* ── race condition callout ── */
+    .callout {
+      background: rgba(217, 119, 6, 0.08);
+      border: 1px solid rgba(217, 119, 6, 0.3);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-top: 32px;
+      font-size: 14px;
+      color: var(--text);
+    }
+    .callout strong { color: #d97706; }
+
+    /* ── install ── */
+    .install {
+      padding: 80px 32px;
+      max-width: 720px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .install h2 { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
+    .install .sub { color: var(--muted); margin-bottom: 40px; font-size: 15px; }
+    .steps {
+      text-align: left;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 32px;
+      counter-reset: step;
+      margin-bottom: 32px;
+    }
+    .steps li {
+      list-style: none;
+      counter-increment: step;
+      padding: 10px 0 10px 40px;
+      position: relative;
+      font-size: 15px;
+      border-bottom: 1px solid var(--border);
+    }
+    .steps li:last-child { border-bottom: none; }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 12px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <span class="nav-brand"><span class="dot"></span> robots.txt emulator</span>
+    <a href="#features">Features</a>
+    <a href="#how-it-works">How it works</a>
+    <a href="#install">Install</a>
+    <span class="nav-spacer"></span>
+    <a class="nav-gh" href="https://github.com/VorticonCmdr/robotstxt" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </nav>
+
+  <!-- hero -->
+  <section class="hero">
+    <div class="hero-badge">Manifest V3 · Chrome Extension</div>
+    <h1>Browse the web like<br>a <code>robots.txt</code> crawler</h1>
+    <p class="hero-sub">
+      Enforces <code>robots.txt</code> rules for your own browser traffic.
+      Every domain you visit is checked — disallowed paths are blocked before
+      the request reaches the network.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/VorticonCmdr/robotstxt/releases/latest" target="_blank" rel="noopener">
+        Download latest release
+      </a>
+      <a class="btn btn-secondary" href="https://github.com/VorticonCmdr/robotstxt" target="_blank" rel="noopener">
+        View source
+      </a>
+    </div>
+  </section>
+
+  <!-- screenshots -->
+  <section class="screenshots" id="screenshots">
+    <h2>Screenshots</h2>
+    <div class="screenshot-grid">
+      <div class="screenshot-card">
+        <!-- replace src with your actual screenshot file -->
+        <div class="screenshot-placeholder">screenshot coming soon</div>
+        <div class="caption">Popup — toggle blocking, open live log or cache editor</div>
+      </div>
+      <div class="screenshot-card">
+        <div class="screenshot-placeholder">screenshot coming soon</div>
+        <div class="caption">Live log — blocked requests in real time with line-level links</div>
+      </div>
+      <div class="screenshot-card">
+        <div class="screenshot-placeholder">screenshot coming soon</div>
+        <div class="caption">robots.txt cache editor — annotated, inline-editable, with URL tester</div>
+      </div>
+      <div class="screenshot-card">
+        <div class="screenshot-placeholder">screenshot coming soon</div>
+        <div class="caption">Race condition banner — reload prompt when blocking was missed</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- features -->
+  <section class="features" id="features">
+    <h2>Features</h2>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <span class="feature-icon">🚫</span>
+        <h3>Real blocking</h3>
+        <p>Uses Chrome's <code>declarativeNetRequest</code> API. Disallowed requests are cancelled before they reach the network — not just logged.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">📋</span>
+        <h3>Live log</h3>
+        <p>See every blocked request in real time: URL, method, resource type, reason, and the exact <code>robots.txt</code> line that triggered the block.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">✏️</span>
+        <h3>Editable cache</h3>
+        <p>Inspect and edit any cached <code>robots.txt</code> directly in the browser. Changes take effect immediately — no refetch needed.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔍</span>
+        <h3>URL tester</h3>
+        <p>Type any URL to instantly see whether it would be allowed or blocked — and which rule is responsible.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🤖</span>
+        <h3>Selectable user-agent</h3>
+        <p>Test as <code>*</code>, Googlebot, or any custom agent. Switching triggers an immediate rule rebuild for all cached domains.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">⚠️</span>
+        <h3>Race condition detection</h3>
+        <p>First visits can't be blocked (rules must be installed ahead of requests). The extension detects this, logs it, and shows a reload banner.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">💾</span>
+        <h3>Persistent rules</h3>
+        <p>DNR rules and cache survive browser restarts and service worker sleep. Revisited domains are blocked immediately from the first request.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔗</span>
+        <h3>Deep links</h3>
+        <p>Click a line number in the live log to jump directly to that line in the cache editor — host pre-selected and line highlighted.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- how it works -->
+  <section class="how" id="how-it-works">
+    <div class="how-inner">
+      <h2>How it works</h2>
+      <p class="sub">Manifest V3 removed blocking <code>webRequest</code>, so blocking and observation are split across two mechanisms.</p>
+
+      <div class="flow">
+        <div class="flow-step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h4>Navigation detected</h4>
+            <p><code>webNavigation.onBeforeNavigate</code> fires when you navigate to any HTTP(S) page.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h4>robots.txt fetched &amp; cached</h4>
+            <p>The extension fetches <code>/robots.txt</code> for the domain and caches it for 24 hours. Server errors trigger a deny-all; 4xx or no file trigger allow-all.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h4>DNR rules installed</h4>
+            <p>Each <code>Allow</code> and <code>Disallow</code> path is translated into a <code>declarativeNetRequest</code> dynamic rule and installed in Chrome — before any sub-resources fire.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h4>Requests blocked</h4>
+            <p>Chrome evaluates the rules natively — no JavaScript involved. Longer, more specific patterns take priority; <code>Allow</code> beats <code>Disallow</code> at equal specificity.</p>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <h4>Observer logs the verdict</h4>
+            <p>A non-blocking <code>webRequest</code> listener re-runs Google's official <code>RobotsMatcher</code> for ground-truth logging. The exact <code>robots.txt</code> line number is resolved and sent to the live log.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>⚠ First-visit race condition</strong><br>
+        On the very first visit to an uncached domain, requests may fire before rules are installed.
+        The extension detects this retroactively, logs affected URLs as <strong>robots-race</strong>,
+        changes the extension icon, and shows a reload banner on the tab — so you can force a clean
+        page load with rules already in place.
+      </div>
+    </div>
+  </section>
+
+  <!-- install -->
+  <section class="install" id="install">
+    <h2>Install</h2>
+    <p class="sub">Not yet on the Chrome Web Store — install manually from the latest release.</p>
+    <ol class="steps">
+      <li>Download <code>robotstxt-vX.Y.zip</code> from the <a href="https://github.com/VorticonCmdr/robotstxt/releases/latest" target="_blank" rel="noopener">latest release</a></li>
+      <li>Unzip the file into a folder on your machine</li>
+      <li>Open <code>chrome://extensions</code> in Chrome</li>
+      <li>Enable <strong>Developer mode</strong> (top right toggle)</li>
+      <li>Click <strong>Load unpacked</strong> and select the unzipped folder</li>
+      <li>Pin the extension to the toolbar — you're done</li>
+    </ol>
+    <a class="btn btn-primary" href="https://github.com/VorticonCmdr/robotstxt/releases/latest" target="_blank" rel="noopener">
+      Download latest release
+    </a>
+  </section>
+
+  <footer>
+    <p>
+      <a href="https://github.com/VorticonCmdr/robotstxt" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/VorticonCmdr/robotstxt/releases" target="_blank" rel="noopener">Releases</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/VorticonCmdr/robotstxt/blob/master/README.md" target="_blank" rel="noopener">Documentation</a>
+    </p>
+    <p style="margin-top:8px;">robots.txt emulator · MIT License</p>
+  </footer>
+
+</body>
+</html>
