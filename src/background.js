@@ -20,6 +20,7 @@ import {
   rebuildHostRules, clearAllDynamicRules,
 } from './dnr.js';
 import { findMatchingLine } from './extract.js';
+import raceIconUrl from '../icons/icon48race.png?url';
 
 const matcher = new RobotsMatcher();
 const DAY_MS = 86400000;
@@ -194,7 +195,7 @@ async function processRaceQueue(key, entry) {
 
   if (blockedPerTab.size === 0) return;
 
-  chrome.action.setIcon({ path: 'icons/icon48race.png' });
+  chrome.action.setIcon({ path: raceIconUrl });
 
   for (const [tabId, count] of blockedPerTab) {
     chrome.scripting.executeScript({
