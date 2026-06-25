@@ -3,44 +3,114 @@
   <head>
     <title>options | robots.txt emulator</title>
     <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link href="css/bootstrap.min.css" rel="stylesheet" />
-    <script src="js/jquery.min.js"></script>
-    <script src="js/mustache.min.js"></script>
-    <script src="js/options.js"></script>
-    <style type="text/css">
-      .options {
-        max-width: 330px;
-        padding: 15px;
-        margin: 0 auto;
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        background: #f5f5f5;
+        color: #222;
+        padding: 32px 16px;
       }
-      .headline {
-        text-align: center;
+
+      .page {
+        max-width: 480px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      h1 {
+        font-size: 18px;
+        font-weight: 700;
+        color: #1a1a1a;
+      }
+
+      .card {
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      label {
+        font-weight: 600;
+        font-size: 13px;
+        color: #333;
+      }
+
+      .hint {
+        font-size: 12px;
+        color: #888;
+        margin-top: -4px;
+      }
+
+      input[type="text"] {
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 7px 10px;
+        font-size: 13px;
+        outline: none;
+        width: 100%;
+        background: #fff;
+        color: #222;
+      }
+      input[type="text"]:focus { border-color: #1a73e8; }
+
+      button {
+        border-radius: 4px;
+        padding: 7px 16px;
+        font-size: 13px;
+        cursor: pointer;
+        border: 1px solid #ccc;
+        background: #fff;
+        color: #333;
+      }
+      button:hover { background: #f0f0f0; }
+      button.btn-danger { border-color: #c0392b; color: #c0392b; }
+      button.btn-danger:hover { background: #fdecea; }
+
+      #savedMsg {
+        font-size: 12px;
+        color: #16a34a;
+        min-height: 16px;
+        font-weight: 600;
       }
     </style>
   </head>
   <body>
+    <div class="page">
+      <h1>robots.txt emulator — options</h1>
 
-    <div class="container">
-      <div class="headline">
-        <h1>robots.txt emulator options</h1>
+      <div class="card">
+        <label for="recordGroup">Preferred user-agent</label>
+        <p class="hint">Select a preset or type any user-agent string. Fallback is <code>*</code>.</p>
+        <input type="text" id="recordGroup" list="recordGroupList"
+               placeholder="*" autocomplete="off" spellcheck="false" />
+        <datalist id="recordGroupList">
+          <option value="*">* (all agents)</option>
+          <option value="googlebot">Googlebot</option>
+          <option value="bingbot">Bingbot</option>
+          <option value="duckduckbot">DuckDuckBot</option>
+        </datalist>
+        <span id="savedMsg"></span>
       </div>
-      <div class="options">
-        <div class="form-group">
-          <label for="recordGroup">preferred record group (user-agent):</label>
-          <select id="recordGroup" class="form-control">
-            <option value="*">*</option>
-            <option value="googlebot">Googlebot</option>
-          </select>
-          <p class="help-block">default record group and fallback is *</p>
-        </div>
-        <div class="form-group">
-          <label for="clearAll">empty stored robots.txt cache:</label>
-          <button id="clearAll" type="button" class="btn btn-danger btn-lg btn-block">clear all</button>
+
+      <div class="card">
+        <label>Cache</label>
+        <p class="hint">Remove all stored robots.txt entries and DNR rules.</p>
+        <div>
+          <button id="clearAll" class="btn-danger">Clear all cached robots.txt</button>
         </div>
       </div>
     </div>
 
+    <script type="module" src="/src/options.js"></script>
   </body>
 </html>

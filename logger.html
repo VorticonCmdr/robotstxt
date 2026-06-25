@@ -1,45 +1,220 @@
 <!doctype html>
 <html>
   <head>
-    <title>block protocol | robots.txt emulator</title>
+    <title>block log — robots.txt emulator</title>
     <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link href="css/bootstrap.min.css" rel="stylesheet" />
-    <script src="js/jquery.min.js"></script>
-    <script src="js/mustache.min.js"></script>
-    <script src="js/logger.js"></script>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html, body {
+        height: 100%;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        color: #222;
+      }
+
+      /* ── page layout: header + controls fixed, table scrolls ── */
+      .page {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+      .scroll-zone {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: auto;
+        background: #f5f5f5;
+      }
+
+      /* ── header ── */
+      header {
+        background: #1a1a2e;
+        color: #fff;
+        padding: 0 16px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      header .title {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        margin-right: 4px;
+      }
+      header .badge {
+        background: #2d2d4e;
+        border: 1px solid #44446a;
+        color: #bbb;
+        border-radius: 12px;
+        padding: 2px 10px;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      header .badge.has-entries { color: #fff; border-color: #6666aa; }
+      #conn-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #444;
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+      #conn-dot.connected { background: #3ddc84; }
+
+      /* ── controls ── */
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        background: #fff;
+        border-bottom: 1px solid #e0e0e0;
+        flex-shrink: 0;
+      }
+      .controls button {
+        padding: 5px 14px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 13px;
+        color: #333;
+      }
+      .controls button:hover { background: #f0f0f0; }
+      #tabSelect {
+        margin-left: auto;
+        padding: 5px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 13px;
+        background: #fff;
+        min-width: 180px;
+        max-width: 320px;
+      }
+
+      /* ── table ── */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+      }
+      thead th {
+        position: sticky;
+        top: 0;
+        background: #f0f0f0;
+        border-bottom: 2px solid #d0d0d0;
+        padding: 7px 10px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #555;
+        white-space: nowrap;
+        z-index: 2;
+      }
+      tbody tr { border-bottom: 1px solid #ececec; }
+      tbody tr:hover { background: #f9f9ff; }
+      tbody td {
+        padding: 6px 10px;
+        vertical-align: middle;
+        color: #333;
+        white-space: nowrap;
+      }
+      td.url {
+        max-width: 380px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+        font-size: 12px;
+        color: #1a1a2e;
+      }
+      td.referrer {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 12px;
+        color: #666;
+      }
+      td.line { color: #888; font-size: 12px; text-align: right; padding-right: 16px; }
+      td.time { font-variant-numeric: tabular-nums; color: #777; }
+      td.method { font-weight: 600; color: #333; }
+
+      /* ── type badges ── */
+      .type-badge {
+        display: inline-block;
+        border-radius: 3px;
+        padding: 1px 7px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #fff;
+        text-transform: lowercase;
+      }
+      .type-document   { background: #c0392b; }
+      .type-script     { background: #6f42c1; }
+      .type-stylesheet { background: #0a7c59; }
+      .type-image      { background: #0e76a8; }
+      .type-xhr        { background: #e67e22; }
+      .type-font       { background: #16a085; }
+      .type-media      { background: #8e44ad; }
+      .type-frame      { background: #d35400; }
+      .type-other      { background: #7f8c8d; }
+
+      /* ── reason ── */
+      td.reason { font-size: 12px; }
+      .reason-disallow    { color: #c0392b; }
+      .reason-unavailable { color: #888; }
+      .reason-race        { color: #d97706; font-weight: 700; }
+
+      #empty-state td {
+        text-align: center;
+        padding: 48px 0;
+        color: #aaa;
+        font-size: 14px;
+      }
+    </style>
   </head>
   <body>
-    <script id="loglineTemplate" type="x-tmpl-mustache">
-      <tr>
-        <th scope="row">{{ blocked }}</th>
-        <td>{{ url }}</td>
-        <td title="{{ tabUrl }}">{{ tabTitle }}</td>
-      </tr>
-    </script>
-    <script id="tabTemplate" type="x-tmpl-mustache">
-      {{#.}}<option value="{{ id }}">{{ title }}</option>{{/.}}
-    </script>
+    <div class="page">
+      <header>
+        <span class="title">robots.txt emulator — block log</span>
+        <span id="badge-blocked" class="badge">0 blocked</span>
+        <span id="badge-origins" class="badge">0 origins</span>
+        <span id="conn-dot"></span>
+      </header>
 
-    <div class="container">
-      <div class="row">
-        <select id="tabSelect" class="form-control">
+      <div class="controls">
+        <button id="btn-clear">Clear display</button>
+        <button id="btn-download">Download JSON</button>
+        <select id="tabSelect">
           <option value="">all tabs</option>
         </select>
-        <table class="table table-hover table-condensed">
+      </div>
+
+      <div class="scroll-zone">
+        <table>
           <thead>
             <tr>
-              <th>blocked</th>
-              <th>blocked url</th>
-              <th>tab title</th>
+              <th>Time</th>
+              <th>Method</th>
+              <th>URL</th>
+              <th>Type</th>
+              <th>Reason</th>
+              <th>Line</th>
+              <th>Referrer</th>
             </tr>
           </thead>
           <tbody id="loglines">
+            <tr id="empty-state"><td colspan="7">Waiting for blocked requests…</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
+    <script type="module" src="/src/logger.js"></script>
   </body>
 </html>

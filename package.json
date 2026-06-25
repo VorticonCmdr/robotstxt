@@ -1,0 +1,22 @@
+{
+  "name": "robotstxt-emulator",
+  "version": "2.0.0",
+  "description": "Chrome extension which blocks urls based on robots.txt",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "bootstrap": "^3.4.1",
+    "google-robotstxt-parser": "^1.2.0",
+    "jquery": "^3.7.1",
+    "mustache": "^4.2.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0",
+    "vite": "^6.0.0"
+  }
+}

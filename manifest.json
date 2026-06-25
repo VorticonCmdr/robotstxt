@@ -1,4 +1,8 @@
 {
+  "manifest_version": 3,
+  "name": "robots.txt emulator",
+  "description": "blocks urls based on robots.txt",
+  "version": "3.0",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -7,13 +11,10 @@
     "128": "icons/icon128.png"
   },
   "background": {
-    "scripts": [
-      "js/background.js"
-    ],
-    "persistent": true
+    "service_worker": "src/background.js",
+    "type": "module"
   },
-  "options_page": "options.html",
-  "browser_action": {
+  "action": {
     "default_icon": {
       "16": "icons/icon16.png",
       "24": "icons/icon24.png",
@@ -22,16 +23,16 @@
     "default_title": "robots.txt emulator",
     "default_popup": "popup.html"
   },
-  "description": "blocks urls based on robots.txt",
-  "manifest_version": 2,
-  "name": "robots.txt emulator",
+  "options_page": "options.html",
   "permissions": [
-
+    "declarativeNetRequest",
     "webRequest",
-    "webRequestBlocking",
+    "scripting",
     "storage",
     "tabs",
-    "\u003Call_urls>"
+    "webNavigation"
   ],
-  "version": "1.2"
+  "host_permissions": [
+    "<all_urls>"
+  ]
 }
